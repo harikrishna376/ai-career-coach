@@ -7,7 +7,8 @@ st.set_page_config(page_title="AI Career Coach", page_icon="🚀", layout="wide"
 
 # --- AI CONFIG ---
 # Using the 2b-it model for faster free inference
-API_URL = "https://api-inference.huggingface.co/models/google/gemma-1.1-2b-it"
+# The stable, actively hosted endpoint
+API_URL = "https://api-inference.huggingface.co/models/google/gemma-2b-it"
 # Access token from Streamlit Secrets
 headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
