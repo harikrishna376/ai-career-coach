@@ -1,69 +1,89 @@
 import streamlit as st
 import requests
-import os
+import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="AI Career Coach", page_icon="🚀")
+st.set_page_config(page_title="AI Career Coach", page_icon="🚀", layout="wide")
 
-# --- AI CONFIG (Hugging Face Free Inference API) ---
-# Get your free token at: https://huggingface.co/settings/tokens
+# --- AI CONFIG ---
+# Using the 2b-it model for faster free inference
 API_URL = "https://api-inference.huggingface.co/models/google/gemma-1.1-2b-it"
+# Access token from Streamlit Secrets
 headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
 def query_gemma(payload):
-    response = requests.post(API_URL, headers=headers, json=payload)
-    return response.json()
+    # 'wait_for_model' tells Hugging Face to hold the request until the model is loaded
+    payload["options"] = {"wait_for_model": True, "use_cache": True}
+    
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 503:
+            return {"error": "Model is loading... please wait a moment and try again."}
+        else:
+            return {"error": f"API Error {response.status_code}: {response.text}"}
+            
+    except Exception as e:
+        return {"error": f"Connection Error: {str(e)}"}
 
-# --- SIDEBAR NAVIGATION ---
-st.sidebar.title("Navigation")
-app_mode = st.sidebar.radio("Choose a Tool", ["Resume Auditor", "Mock Interviewer"])
+# --- UI SETUP ---
+st.sidebar.title("🛠️ Career Tools")
+app_mode = st.sidebar.selectbox("Choose a Mode", ["Resume Auditor", "Mock Interviewer"])
 
 # --- MODE 1: RESUME AUDITOR ---
 if app_mode == "Resume Auditor":
     st.header("📝 Resume Gap Analysis")
-    st.info("Upload your resume text to see where you can improve for Data Science roles.")
+    st.markdown("Past your resume below to find missing skills for **Data Science & ML** roles.")
     
-    resume_input = st.text_area("Paste your Resume Text here:", height=300)
+    resume_text = st.text_area("Resume Content:", height=300, placeholder="Copy and paste your resume text here...")
     
-    if st.button("Analyze Resume"):
-        if resume_input:
-            with st.spinner("Gemma is auditing your profile..."):
-                prompt = f"<start_of_turn>user\nAnalyze this resume for a Data Science Fresher role. Identify missing technical skills and suggest 3 improvements:\n{resume_input}<end_of_turn>\n<start_of_turn>model\n"
+    if st.button("🚀 Analyze My Resume"):
+        if resume_text:
+            with st.spinner("Gemma is auditing your resume..."):
+                prompt = f"<start_of_turn>user\nYou are an expert Technical Recruiter. Analyze this resume for a Data Science Fresher role. \n1. Identify 3 missing technical skills.\n2. Suggest 2 projects to add.\nResume:\n{resume_text}<end_of_turn>\n<start_of_turn>model\n"
+                
                 result = query_gemma({"inputs": prompt})
-                # Handle API response
-                if isinstance(result, list):
-                    st.markdown(result[0]['generated_text'].split("model\n")[-1])
+                
+                if isinstance(result, dict) and "error" in result:
+                    st.error(result["error"])
                 else:
-                    st.error("API is still loading the model. Please try again in 30 seconds.")
+                    # Successfully received JSON list
+                    output = result[0]['generated_text'].split("model\n")[-1]
+                    st.success("Audit Complete!")
+                    st.markdown(output)
         else:
-            st.warning("Please paste your resume first!")
+            st.warning("Please paste your resume text first.")
 
 # --- MODE 2: MOCK INTERVIEWER ---
 else:
-    st.header("🤖 Technical Mock Interview")
-    st.write("Prepare for your upcoming interviews (like TCS NQT) with AI.")
-    
-    job_role = st.text_input("Target Job Role:", value="Data Scientist / Python Developer")
-    
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    st.header("🤖 Mock Interviewer")
+    st.info("I will act as a TCS Technical Interviewer. Let's practice!")
 
-    # Display chat history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-    if prompt := st.chat_input("Your answer..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    # Display Chat
+    for chat in st.session_state.chat_history:
+        with st.chat_message(chat["role"]):
+            st.markdown(chat["content"])
+
+    if user_input := st.chat_input("Answer the question..."):
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_input)
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                system_prompt = f"Act as a Technical Recruiter for {job_role}. Evaluate the user's last answer and ask one follow-up technical question."
-                full_query = f"<start_of_turn>user\n{system_prompt}\nUser says: {prompt}<end_of_turn>\n<start_of_turn>model\n"
+            with st.spinner("Evaluating..."):
+                system_prompt = "Act as a Senior Interviewer. Evaluate the user's answer and ask the next technical question regarding Python or Machine Learning."
+                full_prompt = f"<start_of_turn>user\n{system_prompt}\nUser Answer: {user_input}<end_of_turn>\n<start_of_turn>model\n"
                 
-                result = query_gemma({"inputs": full_query})
-                response_text = result[0]['generated_text'].split("model\n")[-1] if isinstance(result, list) else "Model is warming up..."
-                st.markdown(response_text)
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                result = query_gemma({"inputs": full_prompt})
+                
+                if isinstance(result, dict) and "error" in result:
+                    st.error(result["error"])
+                else:
+                    response = result[0]['generated_text'].split("model\n")[-1]
+                    st.markdown(response)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
