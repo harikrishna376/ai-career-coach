@@ -1,91 +1,87 @@
 import streamlit as st
-import requests
-import time
+from groq import Groq
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="AI Career Coach", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="AI Career Coach", page_icon="⚙️", layout="wide")
 
-# --- AI CONFIG ---
-# Using the 2b-it model for faster free inference
-# The stable, actively hosted endpoint
-# The stable, actively hosted endpoint
-API_URL = "https://api-inference.huggingface.co/models/google/gemma-2b-it"
-# Access token from Streamlit Secrets
-headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+# --- INITIALIZE CLIENT ---
+try:
+    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+except KeyError:
+    st.error("FATAL ERROR: GROQ_API_KEY is missing from Streamlit Secrets.")
+    st.stop()
 
-def query_gemma(payload):
-    # 'wait_for_model' tells Hugging Face to hold the request until the model is loaded
-    payload["options"] = {"wait_for_model": True, "use_cache": True}
-    
+def query_ai(prompt, system_prompt):
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 503:
-            return {"error": "Model is loading... please wait a moment and try again."}
-        else:
-            return {"error": f"API Error {response.status_code}: {response.text}"}
-            
+        # Using Llama 3 8B - Fast, highly capable, and stable
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1024
+        )
+        return completion.choices[0].message.content
     except Exception as e:
-        return {"error": f"Connection Error: {str(e)}"}
+        return f"API Error: {str(e)}"
 
 # --- UI SETUP ---
 st.sidebar.title("🛠️ Career Tools")
-app_mode = st.sidebar.selectbox("Choose a Mode", ["Resume Auditor", "Mock Interviewer"])
+app_mode = st.sidebar.selectbox("Choose a Tool", ["Resume Auditor", "Mock Interviewer"])
 
 # --- MODE 1: RESUME AUDITOR ---
 if app_mode == "Resume Auditor":
     st.header("📝 Resume Gap Analysis")
-    st.markdown("Past your resume below to find missing skills for **Data Science & ML** roles.")
+    st.markdown("Paste your resume. The audit will be ruthless. Identify your gaps before recruiters do.")
     
-    resume_text = st.text_area("Resume Content:", height=300, placeholder="Copy and paste your resume text here...")
+    resume_text = st.text_area("Resume Content:", height=300)
     
-    if st.button("🚀 Analyze My Resume"):
+    if st.button("🚀 Execute Audit"):
         if resume_text:
-            with st.spinner("Gemma is auditing your resume..."):
-                prompt = f"<start_of_turn>user\nYou are an expert Technical Recruiter. Analyze this resume for a Data Science Fresher role. \n1. Identify 3 missing technical skills.\n2. Suggest 2 projects to add.\nResume:\n{resume_text}<end_of_turn>\n<start_of_turn>model\n"
+            with st.spinner("Analyzing architecture and project depth..."):
+                sys_prompt = "You are a strict, senior engineering manager auditing a fresher's resume for Data Science and Machine Learning roles. Do not sugarcoat. Identify exactly 3 technical gaps and suggest 2 rigorous projects to fix them."
                 
-                result = query_gemma({"inputs": prompt})
+                result = query_ai(resume_text, sys_prompt)
                 
-                if isinstance(result, dict) and "error" in result:
-                    st.error(result["error"])
+                if "API Error" in result:
+                    st.error(result)
                 else:
-                    # Successfully received JSON list
-                    output = result[0]['generated_text'].split("model\n")[-1]
-                    st.success("Audit Complete!")
-                    st.markdown(output)
+                    st.success("Audit Complete.")
+                    st.markdown(result)
         else:
-            st.warning("Please paste your resume text first.")
+            st.warning("Input required. Paste your resume text.")
 
 # --- MODE 2: MOCK INTERVIEWER ---
 else:
-    st.header("🤖 Mock Interviewer")
-    st.info("I will act as a TCS Technical Interviewer. Let's practice!")
+    st.header("🤖 Technical Mock Interview")
+    st.info("Strict technical evaluation for Data Science and Python Engineering roles.")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    # Display Chat
     for chat in st.session_state.chat_history:
         with st.chat_message(chat["role"]):
             st.markdown(chat["content"])
 
-    if user_input := st.chat_input("Answer the question..."):
+    if user_input := st.chat_input("Submit your answer..."):
         st.session_state.chat_history.append({"role": "user", "content": user_input})
+        
         with st.chat_message("user"):
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
-            with st.spinner("Evaluating..."):
-                system_prompt = "Act as a Senior Interviewer. Evaluate the user's answer and ask the next technical question regarding Python or Machine Learning."
-                full_prompt = f"<start_of_turn>user\n{system_prompt}\nUser Answer: {user_input}<end_of_turn>\n<start_of_turn>model\n"
+            with st.spinner("Evaluating logic..."):
+                sys_prompt = "Act as a ruthless Technical Interviewer assessing a candidate for a competitive Data Science role. Evaluate their previous answer for logical flaws, lack of depth, or poor architecture. Ask the next highly technical question related to machine learning pipelines, regression models, or data structures. Do not break character."
                 
-                result = query_gemma({"inputs": full_prompt})
+                # Pass the last few interactions for context
+                context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-3:]])
                 
-                if isinstance(result, dict) and "error" in result:
-                    st.error(result["error"])
+                result = query_ai(context, sys_prompt)
+                
+                if "API Error" in result:
+                    st.error(result)
                 else:
-                    response = result[0]['generated_text'].split("model\n")[-1]
-                    st.markdown(response)
-                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    st.markdown(result)
+                    st.session_state.chat_history.append({"role": "assistant", "content": result})
